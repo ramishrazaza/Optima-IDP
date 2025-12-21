@@ -43,6 +43,7 @@ class RecommendationRequest(BaseModel):
     custom_weights: Optional[Dict[str, float]] = None  # NEW: Dynamic weights from admin panel
     limit: Optional[int] = 10  # Number of recommendations to return
     persona: Optional[str] = None  # Persona identifier (e.g., 'manager', 'tech_lead')
+    goal_text: Optional[str] = None # NEW: Smart Goal text (e.g. "I want to be a full stack dev")
 
 
 class SimilarSkillsRequest(BaseModel):
@@ -102,6 +103,28 @@ async def get_resource_recommendations(request: RecommendationRequest):
                 request.skills,
                 request.user_skills_data
             )
+            
+        # Step 3.5: Process Free-Text Goals (Smart Goals)
+        # If user has a text goal like "Learn Full Stack", find relevant skills
+        if request.goal_text:
+            print(f"Processing goal text: {request.goal_text}")
+            # Find skills similar to the goal text
+            # We treat the goal text as a "skill" for vector search
+            similar_to_goal = similarity_calculator.find_similar_skills_by_text(
+                request.goal_text, 
+                request.skills, 
+                top_k=3
+            )
+            
+            existing_ids = {s.get('skillId') for s in skills_to_improve}
+            for skill in similar_to_goal:
+                skill_id = str(skill.get('_id', ''))
+                if skill_id not in existing_ids:
+                    print(f"Adding implied skill from goal: {skill.get('name')}")
+                    skills_to_improve.append({
+                        'skillId': skill_id,
+                        'gap': 0.8  # High priority for goal-derived skills
+                    })
         
         # Step 4: Prepare resource features
         resource_features = preprocessor.prepare_resource_features(request.resources)

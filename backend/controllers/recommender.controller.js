@@ -9,14 +9,14 @@ const path = require("path");
 
 const CONFIG_PATH = path.join(__dirname, "../../config/recommender-weights.json");
 
-// DEFAULT WEIGHTS
+// EXP: Tuned Weights for Better Accuracy
 const DEFAULT_WEIGHTS = {
-    skill_gap: 0.35,
-    skill_relevance: 0.25,
+    skill_gap: 0.30,         // Slightly reduced
+    skill_relevance: 0.20,   // Reduced to make room for similarity
     difficulty_match: 0.20,
-    collaborative: 0.20,
+    collaborative: 0.15,     // Slightly reduced
     resource_type: 0.00,
-    skill_similarity: 0.00
+    skill_similarity: 0.15   // ENABLED: Allow fuzzy matching for goals
 };
 
 // Helper to get company-specific weights
@@ -47,6 +47,7 @@ const getWeights = async (company) => {
 exports.getSuggestions = async (req, res) => {
     try {
         const userId = req.user._id;
+        const userCompany = req.user.company;
         // Expect targetSkills in body, e.g., [{ skillId: "...", targetLevel: 5 }]
         const { targetSkills } = req.body;
 
@@ -63,37 +64,51 @@ exports.getSuggestions = async (req, res) => {
             level: s.level
         }));
 
-        // 2. Fetch Performance Reports (for context)
-        // Python expects: [{ "skillId": "...", "score": 8, "feedback": "..." }]
-        // We'll just fetch recent ones
+        // 2. Fetch User Goals (from latest IDP)
+        // We want to send free-text goals to the AI for semantic matching
+        const latestIdp = await IDP.findOne({
+            employee: userId,
+            status: { $in: ['approved', 'pending', 'draft'] }
+        }).sort({ createdAt: -1 }).lean();
+
+        const goalText = latestIdp ? latestIdp.goals : "";
+
+        // 3. Fetch Performance Reports (for context)
         const reports = await PerformanceReport.find({ employee: userId })
             .sort({ createdAt: -1 })
             .limit(5)
             .lean();
 
-        // Transform reports if necessary, or pass as is (depending on what Python expects)
-        // Based on python schema: List[Dict[str, Any]]
-        // Let's sanitize slightly
         const performanceReports = reports.map(r => ({
             ...r,
             _id: r._id.toString()
         }));
 
-        // 3. Fetch System Data (All Skills & Resources)
-        // This is the "heavy" part for the stateless architecture
+        // 4. Fetch System Data (All Skills & Resources)
         const allSkills = await Skill.find({}).lean();
-        // POPULATE createdBy to get author name
-        const allResources = await Resource.find({}).populate("createdBy", "name").lean();
 
-        // 4. Fetch Peer Data (Collaborative Filtering)
-        // Get all other users and their approved/completed IDPs
-        const allUsers = await User.find({ _id: { $ne: userId } })
+        // FILTER: Only fetch resources created by users in the SAME COMPANY
+        // First, find all users in this company
+        const companyUsers = await User.find({ company: userCompany }).select('_id');
+        const companyUserIds = companyUsers.map(u => u._id);
+
+        // Fetch resources created by these users OR created by system admins (if we had a super-admin concept, but here strictly company)
+        const allResources = await Resource.find({
+            createdBy: { $in: companyUserIds }
+        }).populate("createdBy", "name").lean();
+
+        // 5. Fetch Peer Data (Collaborative Filtering - Same Company Only)
+        // Get all other users in SAME COMPANY and their approved/completed IDPs
+        const allUsers = await User.find({
+            _id: { $ne: userId },
+            company: userCompany
+        })
             .select("skills role")
             .lean();
 
         const allIDPs = await IDP.find({
             status: { $in: ["approved", "completed"] },
-            employee: { $ne: userId }
+            employee: { $in: allUsers.map(u => u._id) } // Only peers from same company
         }).select("employee recommendedResources").lean();
 
         // Create a map of user -> used resources
@@ -129,62 +144,56 @@ exports.getSuggestions = async (req, res) => {
             skill: r.skill ? { ...r.skill, _id: r.skill.toString() } : null
         }));
 
-        // 5. Construct Payload
-        // Match RecommendationRequest model in Python
+        // 6. Construct Payload
         const params = await getWeights(user.company);
 
         const payload = {
             user_skills: userSkills,
-            skills_to_improve: targetSkills || [], // [{ "skillId": "...", "gap": ... }]
+            skills_to_improve: targetSkills || [],
             performance_reports: performanceReports,
             resources: formattedResources,
             skills: formattedSkills,
-            user_skills_data: [], // Legacy field
-            peer_data: peerData,  // Data for collaborative filtering
+            user_skills_data: [],
+            peer_data: peerData,
             limit: 10,
-            persona: user.role, // "employee", "manager", etc.
-            custom_weights: params // Inject dynamic weights
+            persona: user.role,
+            custom_weights: params,
+            goal_text: goalText  // NEW: Pass goal text to AI
         };
 
         let aiResponse;
         try {
-            // 6. Call Python Service
-            console.log("Calling Python AI Service...");
+            // 7. Call Python Service
+            console.log("Calling Python AI Service with goals:", goalText);
             aiResponse = await RecommenderService.getRecommendedResources(payload);
         } catch (aiError) {
             console.error("⚠️ Python AI Service Failed (Falling back to static list):", aiError.message);
             // FALLBACK: Return random resources if AI service is down
-            // Shuffle formattedResources
             const shuffled = formattedResources.sort(() => 0.5 - Math.random());
             aiResponse = {
                 recommendations: shuffled.slice(0, 10).map(r => ({
-                    resourceId: r._id, // match Python response structure roughly
+                    resourceId: r._id,
                     title: r.title,
                     provider: r.provider,
                     type: r.type,
                     url: r.url,
                     duration: r.duration,
-                    author: r.createdBy ? r.createdBy.name : 'Unknown' // explicit fallback author field
+                    author: r.createdBy ? r.createdBy.name : 'Unknown'
                 }))
             };
         }
 
         // DEDUPLICATE RESPONSE
         if (aiResponse && aiResponse.recommendations) {
-            console.log("Deduplicating recommendations...");
             const uniqueRecs = [];
             const seenIds = new Set();
 
             aiResponse.recommendations.forEach(rec => {
-                // Handle different ID formats (resourceId vs _id vs id)
                 const rId = rec.resourceId || rec._id || rec.id;
-
-                // Also finding the original resource to ensure 'provider' is set correctly if missing in AI response
                 const originalRes = formattedResources.find(fr => fr._id === rId);
 
-                // Enrich recommendation with provider if missing (common in AI response)
                 if (originalRes && (!rec.provider || rec.provider === 'Unknown')) {
-                    rec.provider = originalRes.provider; // This already has valid name from formattedResources step
+                    rec.provider = originalRes.provider;
                 }
 
                 if (rId && !seenIds.has(rId)) {

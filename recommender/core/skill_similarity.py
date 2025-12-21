@@ -129,3 +129,49 @@ class SkillSimilarityCalculator:
             })
         
         return similar_skills
+
+    def find_similar_skills_by_text(self, text: str, all_skills: List[Dict[str, Any]], top_k: int = 3) -> List[Dict[str, Any]]:
+        """
+        Find skills similar to a free-text query (e.g., a goal description).
+        
+        Args:
+            text: Free text query (e.g., "I want to learn web development")
+            all_skills: List of all skills in the system (to ensure vector store is up to date)
+            top_k: Number of skills to return
+            
+        Returns:
+            List of skill objects
+        """
+        if not text:
+            return []
+            
+        # Ensure vector store is populated
+        if len(self.vector_store.index) == 0:
+             # Extract text for embeddings
+            texts = [f"{s.get('name', '')} {s.get('description', '')}" for s in all_skills]
+            embeddings = generate_embeddings(texts)
+            
+            skills_with_embeddings = []
+            for i, skill in enumerate(all_skills):
+                skill_copy = skill.copy()
+                skill_copy['embedding'] = embeddings[i]
+                skills_with_embeddings.append(skill_copy)
+                
+            self.vector_store.add_skills(skills_with_embeddings)
+
+        # Generate embedding for the query text
+        from core.embeddings import generate_embedding
+        query_embedding = generate_embedding(text)
+        
+        # Search in vector store
+        # results list of (skill_id, distance)
+        results = self.vector_store.search(query_embedding, top_k)
+        
+        found_skills = []
+        for skill_id, score in results:
+            # Find the full skill object
+            skill = next((s for s in all_skills if str(s.get('_id', '')) == skill_id), None)
+            if skill:
+                found_skills.append(skill)
+                
+        return found_skills

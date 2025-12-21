@@ -14,12 +14,12 @@ INDEX_FILE = "data/faiss_index.bin"
 ID_MAP_FILE = "data/id_map.pkl"
 
 class VectorStore:
-    def __init__(self, dimension=384):
+    def __init__(self, dimension=768):
         """
         Initialize the Vector Store.
         
         Args:
-            dimension (int): Dimension of the embeddings (384 for MiniLM)
+            dimension (int): Dimension of the embeddings (768 for all-mpnet-base-v2)
         """
         self.dimension = dimension
         self.index = faiss.IndexFlatL2(dimension) # L2 distance (Euclidean)

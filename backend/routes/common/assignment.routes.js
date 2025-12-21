@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const assignmentController = require('../controllers/assignment.controller');
-const authMiddleware = require('../middleware/authMiddleware');
-const roleMiddleware = require('../middleware/roleMiddleware');
+const assignmentController = require('../../controllers/assignment.controller');
+const authMiddleware = require('../../middleware/authMiddleware');
+const roleMiddleware = require('../../middleware/roleMiddleware');
 
 // Base path: /api/assignments
 

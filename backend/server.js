@@ -87,7 +87,7 @@ app.use("/api/recommend", require("./routes/common/recommend.routes"));
 app.use("/api/admin", require("./routes/admin/admin.routes"));
 app.use("/api/manager", require("./routes/manager/manager.routes"));
 app.use("/api/announcements", require("./routes/common/announcement.routes")); // Note: Check if this was common or admin in moves. Based on file listing it is in common.
-app.use("/api/assignments", require("./routes/assignment.routes"));
+app.use("/api/assignments", require("./routes/common/assignment.routes"));
 
 
 

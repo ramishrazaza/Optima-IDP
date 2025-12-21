@@ -314,7 +314,7 @@ const ManagerDashboard = ({ user }) => {
                                 onClick={() => setIsAssignmentModalOpen(true)}
                                 className="w-full text-left p-3 bg-slate-800/50 hover:bg-purple-600/30 border border-slate-700 rounded-lg text-slate-300 hover:text-white transition-colors text-sm font-medium text-purple-400"
                             >
-                                + Assign Mandatory Training
+                                Assign Mandatory Training
                             </button>
                         </div>
                     </div>

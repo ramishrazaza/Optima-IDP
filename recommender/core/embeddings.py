@@ -17,9 +17,10 @@ Handles the conversion of text (skills, descriptions) into vector embeddings.
 Uses a pre-trained model from HuggingFace.
 """
 
-# Load a lightweight, efficient model
-# 'all-MiniLM-L6-v2' is fast and has good accuracy for semantic similarity
-MODEL_NAME = 'all-MiniLM-L6-v2'
+# Load a high-performance model
+# 'all-mpnet-base-v2' is significantly better than MiniLM for semantic search
+# Dimension: 768
+MODEL_NAME = 'all-mpnet-base-v2'
 _model = None
 
 def get_model():
@@ -44,7 +45,7 @@ def generate_embedding(text: str) -> np.ndarray:
         np.ndarray: A numpy array representing the vector embedding
     """
     if not text:
-        return np.zeros(384) # Dimension of MiniLM-L6-v2
+        return np.zeros(768) # Dimension of all-mpnet-base-v2
         
     model = get_model()
     embedding = model.encode(text)
